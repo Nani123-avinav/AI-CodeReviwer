@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CodeViewer - AI Code Review for HTML, CSS and JavaScript</title>
+  <meta name="description" content="CodeViewer is a browser-based code editor with live preview and AI-powered code review using Google Gemini.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html, body { height: 100%; margin: 0; background: #0b1220; }
+    * { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+    *::-webkit-scrollbar { width: 8px; height: 8px; }
+    *::-webkit-scrollbar-thumb { background: #334155; border-radius: 6px; }
+    textarea, .font-mono { font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .slide-in { animation: slideIn .25s cubic-bezier(.16,1,.3,1) forwards; }
+    .fade-in { animation: fadeIn .2s ease-out forwards; }
+  </style>
+</head>
+<body class="bg-[#0b1220] text-slate-200 font-sans antialiased">
+<div class="h-full flex flex-col">
+
+  <!-- Header -->
+  <header class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-slate-800 bg-slate-900/80 backdrop-blur">
+    <div class="flex items-center gap-3">
+      <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-md shadow-blue-500/20">
+        <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+      </div>
+      <div class="font-bold text-white tracking-tight text-base">Code<span class="text-blue-400">Viewer</span></div>
+      <div class="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 pl-3 border-l border-slate-800">
+        <span id="status-dot" class="h-2 w-2 rounded-full bg-emerald-400"></span>
+        <span id="status-text">Ready</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="toggleKeyModal()" id="mode-badge" class="flex items-center gap-1.5 text-xs text-indigo-300 border border-indigo-500/40 bg-indigo-500/15 hover:bg-indigo-500/25 transition rounded-full px-3 py-1">
+        <span class="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" id="key-dot"></span>
+        <span id="mode-label">Add Gemini API Key</span>
+      </button>
+      <button onclick="triggerReview()" id="review-cta" class="flex items-center gap-2 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-60 px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg shadow-blue-600/25 transition">
+        <svg class="w-3.5 h-3.5 text-indigo-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"></path></svg>
+        <span id="review-cta-text">Run AI Code Review</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Workspace -->
+  <main class="relative flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+    <section class="flex flex-col min-h-0 min-w-0 flex-1 border-b md:border-b-0 md:border-r border-slate-800 bg-[#0e1525]">
+      <div role="tablist" class="flex items-center bg-slate-900/70 border-b border-slate-800">
+        <button role="tab" onclick="switchTab('html')" id="tab-html" class="tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 border-blue-500 bg-[#0e1525] text-white transition"><span class="text-orange-400">&lt;/&gt;</span> index.html</button>
+        <button role="tab" onclick="switchTab('css')" id="tab-css" class="tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition"><span class="text-sky-400">#</span> style.css</button>
+        <button role="tab" onclick="switchTab('js')" id="tab-js" class="tab-btn flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 transition"><span class="text-yellow-300">{}</span> script.js</button>
+      </div>
+      <div class="flex flex-1 min-h-0 font-mono text-xs leading-6 bg-[#0e1525]">
+        <div id="gutter" aria-hidden="true" class="select-none overflow-hidden bg-[#090e18] text-slate-600 text-right pl-3 pr-3 pt-3 pb-8 min-w-[3.25rem] border-r border-slate-800/80"></div>
+        <textarea id="editor" spellcheck="false" wrap="off" aria-label="Code editor"
+          class="flex-1 resize-none bg-transparent text-slate-200 outline-none pt-3 pb-8 px-4 overflow-auto whitespace-pre caret-blue-400 selection:bg-blue-500/30 text-xs"></textarea>
+      </div>
+    </section>
+
+    <section class="flex flex-col min-h-0 min-w-0 flex-1 bg-slate-950">
+      <div class="flex items-center gap-2 px-4 py-2.5 bg-slate-900/70 border-b border-slate-800 text-xs text-slate-400">
+        <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+        <span class="font-medium text-slate-300">Live Preview</span>
+      </div>
+      <iframe id="preview-frame" title="Live preview" sandbox="allow-scripts allow-modals allow-forms" class="flex-1 w-full border-0 bg-white"></iframe>
+    </section>
+
+    <!-- AI Review Drawer -->
+    <aside id="review-drawer" class="hidden absolute right-0 top-0 bottom-0 z-30 w-full max-w-[480px] bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col slide-in">
+      <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-800">
+        <div class="font-semibold text-white text-sm">AI Code Review</div>
+        <button onclick="closeDrawer()" aria-label="Close review" class="p-1.5 rounded-md hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-lg leading-none">&times;</button>
+      </div>
+      <div class="flex-1 overflow-y-auto p-5 space-y-6 text-xs">
+        <div id="drawer-loading" class="h-64 flex flex-col items-center justify-center text-slate-400 text-center gap-3">
+          <svg class="w-8 h-8 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
+          <div class="font-medium text-slate-300">Gemini is analysing your HTML, CSS and JavaScript...</div>
+          <div class="text-[11px] text-slate-500">Checking bugs, accessibility, syntax and best practices</div>
+        </div>
+        <div id="drawer-error" class="hidden rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-red-200">
+          <p class="font-semibold mb-1">Review could not be completed</p>
+          <p id="error-text" class="text-red-300/90 break-words"></p>
+          <button onclick="triggerReview()" class="mt-3 rounded-md bg-red-500/20 hover:bg-red-500/30 px-3 py-1.5 text-xs">Try again</button>
+        </div>
+        <div id="drawer-results" class="hidden space-y-5">
+          <section class="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+            <div class="text-center px-2">
+              <div id="review-score" class="text-4xl font-extrabold tabular-nums text-emerald-400">0.0</div>
+              <div class="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mt-0.5">out of 10</div>
+            </div>
+            <p id="review-summary" class="text-xs text-slate-300 leading-relaxed border-l border-slate-800 pl-4"></p>
+          </section>
+          <section>
+            <h3 class="text-[11px] uppercase tracking-wider text-slate-400 font-bold mb-2.5">Detected Issues (<span id="issue-count">0</span>)</h3>
+            <div id="issues-list" class="space-y-2.5"></div>
+          </section>
+          <section>
+            <h3 class="text-[11px] uppercase tracking-wider text-slate-400 font-bold mb-2.5">Recommendations</h3>
+            <div id="recs-list" class="space-y-2.5"></div>
+          </section>
+        </div>
+      </div>
+      <div id="drawer-footer" class="hidden p-4 border-t border-slate-800 bg-slate-950/50">
+        <button onclick="applyOptimizedCode()" class="w-full rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 py-2.5 text-xs font-semibold text-white shadow-lg shadow-blue-600/25 transition">Apply AI Optimised Code</button>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<!-- API Key Modal -->
+<div id="key-modal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="w-full max-w-md bg-slate-900 border border-slate-700/80 rounded-2xl p-6 shadow-2xl fade-in">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="font-bold text-white text-base">Connect Google Gemini</h3>
+      <button onclick="toggleKeyModal()" aria-label="Close" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+    </div>
+    <p class="text-xs text-slate-300 mb-4 leading-relaxed">CodeViewer sends your code to the Gemini 2.5 Flash model for review. Enter your own API key to continue.</p>
+    <label for="modal-key-input" class="block text-xs font-medium text-slate-400 mb-1.5">Google Gemini API Key</label>
+    <input type="password" id="modal-key-input" placeholder="AIzaSy..." class="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 placeholder-slate-600 outline-none focus:border-blue-500">
+    <p class="text-[11px] text-slate-500 mt-2 mb-5">Get a free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" class="text-blue-400 underline">Google AI Studio</a>. The key is kept only in this browser tab and is sent only to Google.</p>
+    <button onclick="saveApiKey()" class="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition">Save Key</button>
+  </div>
+</div>
+
+<div id="toast" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-slate-800/95 border border-slate-700 text-white text-xs px-4 py-2 rounded-lg shadow-xl pointer-events-none fade-in"></div>
+
+<script>
+  // Starter project shown when the page loads
+  const STARTER = {
+    html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CodeViewer Sample</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="card">
+    <h1>Hello, CodeViewer</h1>
+    <p>Edit the code and press "Run AI Code Review".</p>
+    <button id="btn">Clicked 0 times</button>
+  </div>
+  <script src="script.js"><\/script>
+</body>
+</html>`,
+    css: `body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  font-family: system-ui, sans-serif;
+  background: linear-gradient(135deg, #0f172a, #1e3a8a);
+  color: white;
+}
+.card {
+  padding: 2rem 2.5rem;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.08);
+  text-align: center;
+}
+button {
+  margin-top: 1rem;
+  padding: .6rem 1.2rem;
+  border: 0;
+  border-radius: 10px;
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+}`,
+    js: `var count = 0;
+var btn = document.getElementById("btn");
+btn.addEventListener("click", function () {
+  count++;
+  btn.textContent = "Clicked " + count + " times";
+});`
+  };
+
+  const REVIEW_SCHEMA = {
+    type: "OBJECT",
+    properties: {
+      score: { type: "NUMBER" },
+      summary: { type: "STRING" },
+      issues: { type: "ARRAY", items: { type: "OBJECT", properties: {
+        severity: { type: "STRING", enum: ["critical", "high", "medium", "low"] },
+        category: { type: "STRING", enum: ["bug", "a11y", "syntax"] },
+        file: { type: "STRING" }, title: { type: "STRING" }, description: { type: "STRING" } },
+        required: ["severity", "category", "file", "title", "description"] } },
+      recommendations: { type: "ARRAY", items: { type: "OBJECT", properties: { title: { type: "STRING" }, description: { type: "STRING" } }, required: ["title", "description"] } },
+      refactored: { type: "OBJECT", properties: { html: { type: "STRING" }, css: { type: "STRING" }, js: { type: "STRING" } }, required: ["html", "css", "js"] }
+    },
+    required: ["score", "summary", "issues", "recommendations", "refactored"]
+  };
+
+  let currentFiles = { html: STARTER.html, css: STARTER.css, js: STARTER.js };
+  let activeTab = "html", debounceTimer = null, apiKey = "", lastReview = null, reviewPending = false;
+
+  const $ = (id) => document.getElementById(id);
+  const editor = $("editor"), gutter = $("gutter"), previewFrame = $("preview-frame");
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function init() {
+    editor.value = currentFiles[activeTab];
+    updateGutter();
+    refreshPreview();
+    editor.addEventListener("input", () => { currentFiles[activeTab] = editor.value; updateGutter(); triggerDebouncedPreview(); });
+    editor.addEventListener("scroll", () => { gutter.scrollTop = editor.scrollTop; });
+    editor.addEventListener("keydown", (e) => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const s = editor.selectionStart, en = editor.selectionEnd;
+        editor.value = editor.value.substring(0, s) + "  " + editor.value.substring(en);
+        editor.selectionStart = editor.selectionEnd = s + 2;
+        currentFiles[activeTab] = editor.value; updateGutter(); triggerDebouncedPreview();
+      }
+    });
+  }
+
+  function updateGutter() {
+    const n = editor.value.split("\n").length;
+    let h = "";
+    for (let i = 1; i <= n; i++) h += `<div>${i}</div>`;
+    gutter.innerHTML = h;
+  }
+
+  function switchTab(tabId) {
+    currentFiles[activeTab] = editor.value;
+    activeTab = tabId;
+    document.querySelectorAll(".tab-btn").forEach((b) => {
+      b.classList.remove("border-blue-500", "bg-[#0e1525]", "text-white");
+      b.classList.add("border-transparent", "text-slate-400");
+    });
+    const a = $("tab-" + tabId);
+    a.classList.add("border-blue-500", "bg-[#0e1525]", "text-white");
+    a.classList.remove("border-transparent", "text-slate-400");
+    editor.value = currentFiles[tabId];
+    updateGutter();
+  }
+
+  function buildBundle(f) {
+    const html = f.html
+      .replace(/<link[^>]*href=["']\.?\/?style\.css["'][^>]*>/gi, "")
+      .replace(/<script[^>]*src=["']\.?\/?script\.js["'][^>]*>\s*<\/script>/gi, "");
+    const style = `<style>\n${f.css}\n</style>`;
+    const script = `<script>\n${f.js.replace(/<\/script/gi, "<\\/script")}\n<\/script>`;
+    let doc = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, () => style + "\n</head>") : style + "\n" + html;
+    doc = /<\/body>/i.test(doc) ? doc.replace(/<\/body>/i, () => script + "\n</body>") : doc + "\n" + script;
+    return doc;
+  }
+
+  function refreshPreview() { previewFrame.srcdoc = buildBundle(currentFiles); flashStatus("Preview updated", "bg-emerald-400"); }
+  function triggerDebouncedPreview() {
+    flashStatus("Typing...", "bg-yellow-400");
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(refreshPreview, 350);
+  }
+  function flashStatus(text, color = "bg-emerald-400") {
+    $("status-text").textContent = text;
+    $("status-dot").className = `h-2 w-2 rounded-full ${color}`;
+    if (text !== "Ready") setTimeout(() => { $("status-text").textContent = "Ready"; $("status-dot").className = "h-2 w-2 rounded-full bg-emerald-400"; }, 1800);
+  }
+
+  // Real Gemini call
+  async function fetchGeminiReview(key, files) {
+    const prompt = `You are a senior front-end engineer performing a strict code review.
+Review the three files below. Return JSON only, matching the schema:
+- score: overall code quality out of 10 (one decimal allowed)
+- summary: a 2 to 3 sentence architectural summary
+- issues: bugs, accessibility (a11y) flaws and syntax problems, each with severity (critical|high|medium|low), category (bug|a11y|syntax), file, title, description
+- recommendations: modern best-practice optimisations (title and description)
+- refactored: the COMPLETE improved versions of html, css and js. Preserve the visual intent and behaviour, fix every issue, and keep index.html linking style.css and script.js as separate files.
+
+=== index.html ===
+${files.html}
+
+=== style.css ===
+${files.css}
+
+=== script.js ===
+${files.js}`;
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 16384, responseMimeType: "application/json", responseSchema: REVIEW_SCHEMA, thinkingConfig: { thinkingBudget: 0 } }
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error?.message || `Gemini request failed (${res.status})`);
+    const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+    if (!text) throw new Error("Gemini returned an empty response. Please try again.");
+    let p;
+    try { p = JSON.parse(text.replace(/^```json\s*|^```\s*|```$/gm, "").trim()); }
+    catch { throw new Error("The AI response could not be read as JSON. Please try again."); }
+    return {
+      score: Math.max(0, Math.min(10, Number(p.score) || 0)),
+      summary: p.summary || "",
+      issues: Array.isArray(p.issues) ? p.issues : [],
+      recommendations: Array.isArray(p.recommendations) ? p.recommendations : [],
+      refactored: { html: p.refactored?.html ?? files.html, css: p.refactored?.css ?? files.css, js: p.refactored?.js ?? files.js }
+    };
+  }
+
+  async function triggerReview() {
+    currentFiles[activeTab] = editor.value;
+    if (!apiKey) { reviewPending = true; toggleKeyModal(); return; }
+    $("review-drawer").classList.remove("hidden");
+    $("drawer-loading").classList.remove("hidden");
+    ["drawer-results", "drawer-footer", "drawer-error"].forEach((id) => $(id).classList.add("hidden"));
+    $("review-cta").disabled = true;
+    flashStatus("Reviewing...", "bg-indigo-400 animate-pulse");
+    try {
+      lastReview = await fetchGeminiReview(apiKey, currentFiles);
+      renderReview(lastReview);
+      flashStatus("Review complete", "bg-emerald-400");
+    } catch (err) {
+      $("drawer-loading").classList.add("hidden");
+      $("error-text").textContent = err.message;
+      $("drawer-error").classList.remove("hidden");
+      flashStatus("Review failed", "bg-red-400");
+    } finally {
+      $("review-cta").disabled = false;
+    }
+  }
+
+  function renderReview(d) {
+    $("drawer-loading").classList.add("hidden");
+    $("drawer-results").classList.remove("hidden");
+    $("drawer-footer").classList.remove("hidden");
+    $("review-score").textContent = d.score.toFixed(1);
+    $("review-score").className = "text-4xl font-extrabold tabular-nums " + (d.score >= 8 ? "text-emerald-400" : d.score >= 5 ? "text-yellow-300" : "text-red-400");
+    $("review-summary").textContent = d.summary;
+    $("issue-count").textContent = d.issues.length;
+    const sev = {
+      critical: "bg-red-500/20 text-red-300 border-red-500/40", high: "bg-orange-500/20 text-orange-300 border-orange-500/40",
+      medium: "bg-yellow-500/20 text-yellow-200 border-yellow-500/40", low: "bg-blue-500/20 text-blue-300 border-blue-500/40"
+    };
+    $("issues-list").innerHTML = d.issues.length ? d.issues.map((it) => `
+      <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${sev[it.severity] || sev.low}">${esc(it.severity)}</span>
+          <span class="text-[10px] uppercase font-semibold text-slate-400">${esc(it.category)}</span>
+          <span class="text-[10px] font-mono text-slate-500 ml-auto">${esc(it.file)}</span>
+        </div>
+        <p class="font-semibold text-slate-100 text-xs">${esc(it.title)}</p>
+        <p class="text-slate-400 text-[11px] mt-0.5">${esc(it.description)}</p>
+      </div>`).join("") : '<p class="text-emerald-400">No issues detected.</p>';
+    $("recs-list").innerHTML = d.recommendations.map((r) => `
+      <div class="flex gap-2.5 bg-slate-950/30 p-2.5 rounded-lg border border-slate-800/80">
+        <div class="mt-0.5 text-blue-400">&#9679;</div>
+        <div><p class="font-semibold text-slate-200 text-xs">${esc(r.title)}</p><p class="text-slate-400 text-[11px] mt-0.5 leading-relaxed">${esc(r.description)}</p></div>
+      </div>`).join("");
+  }
+
+  function applyOptimizedCode() {
+    if (!lastReview) return;
+    currentFiles = { ...lastReview.refactored };
+    editor.value = currentFiles[activeTab];
+    updateGutter(); refreshPreview(); closeDrawer();
+    showToast("AI optimised code applied to the workspace");
+  }
+  function closeDrawer() { $("review-drawer").classList.add("hidden"); }
+
+  function showToast(msg) {
+    const t = $("toast"); t.textContent = msg; t.classList.remove("hidden");
+    setTimeout(() => t.classList.add("hidden"), 2500);
+  }
+  function toggleKeyModal() { $("key-modal").classList.toggle("hidden"); if (!$("key-modal").classList.contains("hidden")) $("modal-key-input").focus(); }
+
+  function saveApiKey() {
+    const v = $("modal-key-input").value.trim();
+    if (v.length < 20) { alert("Please enter a valid Gemini API key (it usually begins with AIza)."); return; }
+    apiKey = v;
+    $("mode-label").textContent = "Gemini 2.5 Flash connected";
+    $("key-dot").classList.remove("animate-pulse");
+    $("key-dot").classList.replace("bg-indigo-400", "bg-emerald-400");
+    toggleKeyModal();
+    showToast("Gemini API key connected");
+    if (reviewPending) { reviewPending = false; triggerReview(); }
+  }
+  $("modal-key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") saveApiKey(); });
+
+  init();
+</script>
+</body>
+</html>
